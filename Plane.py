@@ -1,0 +1,1 @@
+print('I`m going to glory')
