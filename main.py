@@ -8,10 +8,12 @@ def main():
         file = open("BattleSkies.redacc", mode="r")
         s = file.readline().strip()
         if s == "loginned":
-            id = int(file.readline().strip())
-            vars.id = vars.deshifr(id)
+            id = int(vars.deshifr(file.readline().strip()))
+            cur = vars.con.cursor()
+            vars.money = cur.execute(f"SELECT * FROM `users` WHERE `id` = '{id}'").fetchall()[0][0]
+            vars.id = id
         else:
-            pass
+            vars.money = int(vars.deshifr(file.readline().strip()))
         file.close()
     except Exception:
         file = open("BattleSkies.redacc", mode="w")

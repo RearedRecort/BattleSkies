@@ -98,7 +98,7 @@ class RegisterView(arcade.View):
             password = self.password.text
             confirm = self.confirm.text
             name = self.name.text
-            nickname = self.name.text
+            nickname = self.nick.text
             email = self.email.text
             if len(login) * len(password) * len(confirm) * len(name) * len(nickname) * len(email) == 0:
                 self.err_label.text = "Не все поля заполнены"

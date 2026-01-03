@@ -6,6 +6,7 @@ from arcade.gui import UIManager, UIFlatButton, UILabel
 from arcade.gui.widgets.layout import UIAnchorLayout, UIBoxLayout
 from login import LoginView
 from settings import SettingsView
+from hub import HubView
 
 
 class StartView(arcade.View):
@@ -60,7 +61,8 @@ class StartView(arcade.View):
         pass
 
     def multiplay(self, event):
-        pass
+        hub_view = HubView()
+        self.window.show_view(hub_view)
 
     def account(self, event):
         if vars.id == 0:
@@ -71,4 +73,5 @@ class StartView(arcade.View):
             self.window.show_view(settings_view)
 
     def ext(self, event):
+        vars.clear_sessions()
         arcade.close_window()
