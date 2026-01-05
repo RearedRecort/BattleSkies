@@ -2,7 +2,7 @@ import vars
 import arcade
 
 
-from arcade.gui import UIManager, UIFlatButton, UILabel, UIInputText
+from arcade.gui import UIManager, UIFlatButton, UILabel, UIInputText, UIMessageBox
 from arcade.gui.widgets.layout import UIAnchorLayout, UIBoxLayout
 from creating import CreatingView
 from lobby_pve import LobbyPveView
@@ -106,13 +106,32 @@ class HubView(arcade.View):
             if pls >= maxi:
                 self.err_label.text = "Данный сервер переполнен"
             else:
-                cur.execute(f"INSERT INTO `session` (`player`, `game`, `plane`) VALUES ({vars.id}, {game}, 0)")
-                vars.con.commit()
                 if mode:
-                    lobby_view = LobbyPvpView(False, game)
+                    a = len(cur.execute(f"SELECT * FROM `session` WHERE `game` = {game} AND `team` = 0").fetchall())
+                    b = len(cur.execute(f"SELECT * FROM `session` WHERE `game` = {game} AND `team` = 1").fetchall())
+                    lst = [a < maxi // 2, b < maxi // 2]
+                    self.sel = -1
+                    if lst[0] and lst[1]:
+                        message_box = UIMessageBox(
+                            width=300, height=200,
+                            message_text="Выберите команду",
+                            buttons=("Синие", "Красные")
+                        )
+                        f = lambda a, g=game: self.selec(a, g)
+                        message_box.on_action = f
+                        self.manager.add(message_box)
+                    else:
+                        self.sel = int(lst[1])
+                        cur.execute("INSERT INTO `session` (`player`, `game`, `plane`, `team`"
+                                    + f") VALUES ({vars.id}, {game}, 0, {self.sel})")
+                        lobby_view = LobbyPvpView(False, game)
+                        vars.con.commit()
+                        self.window.show_view(lobby_view)
                 else:
+                    cur.execute(f"INSERT INTO `session` (`player`, `game`, `plane`) VALUES ({vars.id}, {game}, 0)")
                     lobby_view = LobbyPveView(False, game)
-                self.window.show_view(lobby_view)
+                    vars.con.commit()
+                    self.window.show_view(lobby_view)
         except Exception:
             self.err_label.text = "Лобби не найдено"
 
@@ -124,3 +143,15 @@ class HubView(arcade.View):
         from start import StartView
         start_view = StartView()
         self.window.show_view(start_view)
+
+    def selec(self, text, game):
+        if text.action == "Синие":
+            self.sel = 0
+        else:
+            self.sel = 1
+        cur = vars.con.cursor()
+        cur.execute("INSERT INTO `session` (`player`, `game`, `plane`, `team`"
+                    + f") VALUES ({vars.id}, {game}, 0, {self.sel})")
+        lobby_view = LobbyPvpView(False, game)
+        vars.con.commit()
+        self.window.show_view(lobby_view)

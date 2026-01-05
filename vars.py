@@ -37,10 +37,11 @@ def clear_sessions():
     con.commit()
     lst = cur.execute(f"SELECT `id` FROM `games`").fetchall()
     for el in lst:
-        id = el[0]
-        k = len(cur.execute(f"SELECT * FROM `session` WHERE `game` = {id}").fetchall())
+        idg = el[0]
+        k = len(cur.execute(f"SELECT * FROM `session` WHERE `game` = {idg}").fetchall())
         if k == 0:
-            cur.execute(f"DELETE FROM `games` WHERE `id` = {id}")
+            cur.execute(f"DELETE FROM `games` WHERE `id` = {idg}")
+            cur.execute(f"DELETE FROM `shouting` WHERE `game` = {idg}")
     con.commit()
 
 id = 0

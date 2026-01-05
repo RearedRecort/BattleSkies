@@ -3,6 +3,7 @@ import arcade
 
 from arcade.gui import UIManager, UIFlatButton, UILabel, UISlider, UIDropdown
 from arcade.gui.widgets.layout import UIAnchorLayout, UIBoxLayout
+from pvp import PvpView
 
 
 class LobbyPvpView(arcade.View):
@@ -36,12 +37,24 @@ class LobbyPvpView(arcade.View):
     def on_update(self, delta_time):
         self.players_list.clear()
         cur = vars.con.cursor()
-        lst = cur.execute(f"SELECT `player` FROM `session` WHERE `game` = {self.game}").fetchall()
+        lst = cur.execute(f"SELECT `player`, `team` FROM `session` WHERE `game` = {self.game}").fetchall()
         for el in lst:
             id = el[0]
+            team = el[1]
+            color = arcade.color.DARK_BLUE
+            if team:
+                color = arcade.color.RED
             nick = cur.execute(f"SELECT `nickname` FROM `users` WHERE `id` = {id}").fetchall()[0][0]
-            lbl = UILabel(text=nick, font_size=15, text_color=arcade.color.BLACK, align="center")
+            lbl = UILabel(text=nick, font_size=15, text_color=color, align="center")
             self.players_list.add(lbl)
+        if not self.is_owner:
+            prv = cur.execute(f"SELECT `private` FROM `games` WHERE `id` = {self.game}").fetchall()[0][0]
+            if prv == 2:
+                x, y, t = cur.execute("SELECT `x`, `y`, `team`" +
+                                      f"FROM `session` WHERE `player` = {vars.id}").fetchall()[0]
+                pvp_view = PvpView(False, self.game, x, y, t)
+                self.manager.clear()
+                self.window.show_view(pvp_view)
 
     def setup_widgets(self):
         label = UILabel(text="ЛОББИ (PVP)", font_size=30, text_color=arcade.color.BLACK, width=300, align="center")
@@ -66,5 +79,20 @@ class LobbyPvpView(arcade.View):
         self.window.show_view(hub_view)
 
     def go(self, event):
-        pass
-
+        cur = vars.con.cursor()
+        cur.execute(f"UPDATE `games` SET `private` = 2 WHERE `id` = {self.game}")
+        lst = cur.execute(f"SELECT `id` FROM `session` WHERE `game` = {self.game} AND `team` = 0").fetchall()
+        y = 1000
+        for el in lst:
+            cur.execute(f'UPDATE `session` SET `y` = {y}, `x` = {-100} WHERE `id` = {el[0]}')
+            y += 100
+        lst = cur.execute(f"SELECT `id` FROM `session` WHERE `game` = {self.game} AND `team` = 1").fetchall()
+        y = 1000
+        for el in lst:
+            cur.execute(f'UPDATE `session` SET `y` = {y}, `x` = {100} WHERE `id` = {el[0]}')
+            y += 100
+        vars.con.commit()
+        x, y = cur.execute(f"SELECT `x`, `y` FROM `session` WHERE `player` = {vars.id}").fetchall()[0]
+        pvp_view = PvpView(True, self.game, x, y, 0)
+        self.manager.clear()
+        self.window.show_view(pvp_view)

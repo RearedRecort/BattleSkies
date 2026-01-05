@@ -41,7 +41,7 @@ class Plane(arcade.Sprite):
 
     def rotate(self, n: float):
         # Поворачиваем спрайт
-        self.angle += n
+        self.angle -= n
 
         # Поворачиваем вектор скорости
         radians = math.radians(n)
@@ -62,7 +62,7 @@ class Plane(arcade.Sprite):
 
         # Направление носа самолёта
         direction_x = math.cos(math.radians(self.angle))
-        direction_y = math.sin(math.radians(self.angle))
+        direction_y = -math.sin(math.radians(self.angle))
 
         # Скорость пули = скорость самолёта + скорость выстрела в направлении носа
         missile_vx = self.vx + direction_x * missile_speed
