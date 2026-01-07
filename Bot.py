@@ -11,7 +11,7 @@ class Bot(Plane):
                  max_health=100):
         super().__init__(plane_type, xcoor, ycoor, max_health)
 
-        # === Характеристики ИИ ===
+        # Характеристики
         self.target = target  # Цель
         self.shoot_cooldown = 0.0  # Кулдаун стрельбы
         self.shoot_interval = 1.5  # Интервал между выстрелами
