@@ -21,7 +21,7 @@ class Plane(arcade.Sprite):
         self.texture = arcade.load_texture(texture_path)
 
 
-    def update(self, delta_time: float):
+    def update(self, delta_time):
         # Обновляем координаты по текущим проекциям скорости
         self.center_x += self.vx * delta_time
         self.center_y += self.vy * delta_time
@@ -39,7 +39,7 @@ class Plane(arcade.Sprite):
             self.vx *= scale
             self.vy *= scale
 
-    def rotate(self, n: float):
+    def rotate(self, n):
         # Поворачиваем спрайт
         self.angle -= n
 
