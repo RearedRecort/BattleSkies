@@ -38,11 +38,6 @@ class BattleTest(arcade.View):
         self.planes.update(delta_time)
         self.missiles.update(delta_time)
 
-        # Bots shoot missiles - add to list
-        # Note: In real code, modify Bot to return missile from shoot_at_target
-        # For now, assume it's handled or skip
-
-        # Collisions
         for missile in self.missiles[:]:
             hit_list = arcade.check_for_collision_with_list(missile, self.planes)
             for plane in hit_list:
@@ -54,14 +49,14 @@ class BattleTest(arcade.View):
                 missile.kill()
 
     def on_key_press(self, key, modifiers):
-        if key == arcade.key.LEFT:
+        if key == arcade.key.D:
             self.player.rotate(-5)  # Поворот влево (по часовой)
-        elif key == arcade.key.RIGHT:
+        elif key == arcade.key.A:
             self.player.rotate(5)   # Поворот вправо (против часовой)
         elif key == arcade.key.SPACE:
             missile = self.player.shoot()
             self.missiles.append(missile)
-
+            
     def on_key_release(self, key, modifiers):
         pass
 
