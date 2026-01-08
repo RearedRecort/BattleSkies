@@ -11,7 +11,7 @@ class Bot(Plane):
                  max_health=100):
         super().__init__(plane_type, xcoor, ycoor, max_health)
 
-        # Характеристики
+        # Характеристики ИИ
         self.target = target  # Цель
         self.shoot_cooldown = 0.0  # Кулдаун стрельбы
         self.shoot_interval = 1.5  # Интервал между выстрелами
@@ -24,7 +24,7 @@ class Bot(Plane):
         self.shoot_cooldown = max(0.0, self.shoot_cooldown - delta_time)
 
         # Если нет цели или цель мертва — случайный полёт
-        if not self.target or not self.target.alive():
+        if not self.target or not self.target.alive:
             self.random_fly(delta_time)
             return
 

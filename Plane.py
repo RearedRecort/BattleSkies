@@ -4,7 +4,7 @@ import math
 
 
 class Plane(arcade.Sprite):
-    def __init__(self, plane_type, xcoor, ycoor):
+    def __init__(self, plane_type, xcoor, ycoor, max_health=100):
         super().__init__()
         # Основные характеристики
         self.plane_type = plane_type  # Тип самолёта (для выбора текстуры)
@@ -15,11 +15,12 @@ class Plane(arcade.Sprite):
         self.center_x = float(xcoor)  # Текущая координата X
         self.center_y = float(ycoor)  # Текущая координата Y
         self.angle = 0.0  # Угол поворота спрайта
+        self.max_health = max_health  # Максимальное здоровье
+        self.health = max_health  # Текущее здоровье
 
         # Загрузка текстуры
-        texture_path = os.path.abspath(f'{plane_type}.jpg')
+        texture_path = f'C:\\Users\Ilhom\Documents\GitHub\BattleSkies\PlanesTexture\\{plane_type}.jpg'
         self.texture = arcade.load_texture(texture_path)
-
 
     def update(self, delta_time):
         # Обновляем координаты по текущим проекциям скорости
@@ -83,3 +84,17 @@ class Plane(arcade.Sprite):
         missile.angle = math.degrees(math.atan2(missile_vy, missile_vx))
 
         return missile
+
+    def take_damage(self, amount):
+        self.health -= amount
+        if self.health <= 0:
+            self.health = 0
+            self.kill()
+
+    @property
+    def health_percent(self):
+        return self.health / self.max_health if self.max_health > 0 else 0
+
+    @property
+    def alive(self):
+        return self.health > 0
