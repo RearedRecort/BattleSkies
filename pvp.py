@@ -41,7 +41,7 @@ class PvpView(arcade.View):
             if lst[1] != vars.id:
                 k = lst[3]
                 if k == 0:
-                    texture = "PlanesTexture/F-15.jpg"
+                    texture = "F16.png"
                 x = lst[5]
                 y = lst[6]
                 vx = lst[7]

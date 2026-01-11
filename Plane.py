@@ -19,7 +19,7 @@ class Plane(arcade.Sprite):
         self.health = max_health  # Текущее здоровье
 
         # Загрузка текстуры
-        texture_path = f'C:\\Users\Ilhom\Documents\GitHub\BattleSkies\PlanesTexture\\{plane_type}.jpg'
+        texture_path = f"{plane_type}.png"
         self.texture = arcade.load_texture(texture_path)
 
     def update(self, delta_time):

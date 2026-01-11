@@ -14,7 +14,7 @@ class Missile(arcade.Sprite):
         self.time_left = time_left  # Оставшееся время жизни пули
 
 
-        self.texture = arcade.load_texture("missile.jpg")
+        self.texture = arcade.load_texture("missile.png")
 
 
         # Угол поворота пули соответствует направлению полёта
