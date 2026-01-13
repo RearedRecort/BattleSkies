@@ -46,7 +46,7 @@ class PveView(arcade.View):
         spawn_y = random.randint(200, 1000)
 
         self.current_bot = Bot(
-            "F16",
+            "F-15",
             spawn_x,
             spawn_y,
             target=self.player,
