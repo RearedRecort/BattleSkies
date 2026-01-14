@@ -50,6 +50,9 @@ class StartView(arcade.View):
         if vars.id == 0:
             multi.disabled = True
         self.box_layout.add(multi)
+        skins = UIFlatButton(text="Скины", width=400, height=40)
+        skins.on_click = self.skins
+        self.box_layout.add(skins)
         account = UIFlatButton(text="Аккаунт и настройки", width=400, height=40)
         account.on_click = self.account
         self.box_layout.add(account)
@@ -58,6 +61,9 @@ class StartView(arcade.View):
         self.box_layout.add(ex)
 
     def singleplay(self, event):
+        pass
+
+    def skins(self, event):
         pass
 
     def multiplay(self, event):

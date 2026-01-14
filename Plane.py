@@ -12,6 +12,7 @@ class Plane(arcade.Sprite):
         self.vy = 0.0  # Проекция скорости по оси Y
         self.vmax = 1500.0  # Максимальная скорость
         self.vmin = 350.0  # Минимальная скорость
+        self.v = 350.0
         self.center_x = float(xcoor)  # Текущая координата X
         self.center_y = float(ycoor)  # Текущая координата Y
         self.angle = 0.0  # Угол поворота спрайта
@@ -28,15 +29,15 @@ class Plane(arcade.Sprite):
         self.center_y += self.vy * delta_time
 
         # Вычисляем текущую полную скорость
-        current_speed = (self.vx ** 2 + self.vy ** 2) ** 0.5
+        self.v = (self.vx ** 2 + self.vy ** 2) ** 0.5
 
         # Ограничиваем скорость в пределах vmin и vmax
-        if current_speed > self.vmax:
-            scale = self.vmax / current_speed
+        if self.v > self.vmax:
+            scale = self.vmax / self.v
             self.vx *= scale
             self.vy *= scale
-        elif 0 < current_speed < self.vmin:
-            scale = self.vmin / current_speed
+        elif 0 < self.v < self.vmin:
+            scale = self.vmin / self.v
             self.vx *= scale
             self.vy *= scale
 
@@ -98,3 +99,9 @@ class Plane(arcade.Sprite):
     @property
     def alive(self):
         return self.health > 0
+
+    def set_speed(self, k):
+        scale = k / self.v
+        self.v *= scale
+        self.vx *= scale
+        self.vy *= scale

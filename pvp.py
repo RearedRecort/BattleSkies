@@ -1,146 +1,495 @@
+import math
+import random
 import vars
 import arcade
-
+import pyglet
 
 from arcade.gui import UIManager, UIMessageBox
+from arcade.clock import GLOBAL_CLOCK
+from arcade.particles import FadeParticle, Emitter, EmitMaintainCount
 from Missile import Missile
 from Plane import Plane
+from boom import Boom
+from lose import LoseView
+from win import WinView
 
 
 class PvpView(arcade.View):
+    # Представление для PvP игрового режима
     def __init__(self, is_owner, game, x, y, team):
         super().__init__()
+        # Списки и словари для частиц, игроков и снарядов
+        self.emitters = []
+        self.emitters_by_pid = {}
+        self.time_to_dead = 1
+        self.team = team
         self.is_owner = is_owner
         self.game = game
         arcade.set_background_color(arcade.color.LIGHT_GREEN)
-
-        self.world_camera = arcade.camera.Camera2D(zoom=0.5)  # Камера для игрового мира
-        self.gui_camera = arcade.camera.Camera2D() # Камера для интерфейса
-
-        # UIManager — сердце GUI
+        # Камеры: игровая (world) и GUI
+        self.world_camera = arcade.camera.Camera2D(zoom=0.5)
+        self.gui_camera = arcade.camera.Camera2D()
         self.manager = UIManager()
-        self.manager.enable()  # Включить, чтоб виджеты работали
-
+        self.manager.enable()
         self.planes_list = arcade.SpriteList()
         self.missiles_list = arcade.SpriteList()
-        self.player = Plane("PlanesTexture/F-15", x, y)
-        self.is_pause = False
+        # Основной игрок
+        self.player = Plane("F-15", x, y)
         if team:
+            self.player.scale_x = -1
+        else:
             self.player.vx *= -1
-        self.left = False
-        self.right = False
-        self.up = False
-        self.down = False
-        self.was_shouted = []
+        self.player.vx *= -1
+        # Состояния управления
+        self.left = self.right = self.up = self.down = False
+        self.was_shouted = []  # уже обработанные выстрелы из БД
+        self.nick_cache = {}
+        self.other_players = {}
+        # Для отрисовки имён через pyglet
+        self.name_batch = pyglet.graphics.Batch()
+        self.name_labels = {}
+        self.kills_friends = 0
+        self.kills_enemy = 0
+        self.dead_scheduled = False
+        self.alive_local = True
+        self.win_scheduled = False
+        self.is_pause = False
+        self.message_box = None
+        self.local_hp = 100
+        # HUD
+        self.hud_batch = pyglet.graphics.Batch()
+        self.hp_label = pyglet.text.Label("", font_name="Arial", font_size=14, x=0, y=0, anchor_x='left', anchor_y='top', color=(255,255,255,255), batch=self.hud_batch)
+        self.friends_label = pyglet.text.Label("", font_name="Arial", font_size=14, x=0, y=0, anchor_x='right', anchor_y='top', color=(255,255,255,255), batch=self.hud_batch)
+        self.enemy_label = pyglet.text.Label("", font_name="Arial", font_size=14, x=0, y=30, anchor_x='right', anchor_y='top', color=(255,255,255,255), batch=self.hud_batch)
+        self.local_explosions = arcade.SpriteList()
+        self.explosions = set()
+        # Звуки и музыка
+        self.boom_sound = arcade.load_sound("Sounds/boom.wav")
+        self.max_hear_distance = 1200.0
+        self.background_music = arcade.load_sound("Sounds/plane.mp3")
+        self.time_start = GLOBAL_CLOCK.time_since(0.0)
+
+    def on_show_view(self):
+        # Включаем фоновую музыку при показе представления
+        self.backgound_player = self.background_music.play(loop=True, volume=0.5)
+
+    def world_to_screen(self, x, y):
+        # Перевод координат мира в экранные с учётом камеры и зума
+        try:
+            win_w, win_h = self.window.width, self.window.height
+        except Exception:
+            win_w, win_h = 800, 600
+        cam_x, cam_y = self.world_camera.position[0], self.world_camera.position[1]
+        zoom = self.world_camera.zoom
+        return (x - cam_x) * zoom + win_w / 2, (y - cam_y) * zoom + win_h / 2
+
+    def insert_explosion(self, cur, x, y, creator, victim):
+        # Вставка записи об взрыве в БД
+        try:
+            now = GLOBAL_CLOCK.time_since(0.0)
+            cur.execute(f"INSERT INTO explosions (game,x,y,ttl,created_by,created_at,victim) VALUES ({self.game},{x},{y},{self.time_to_dead},{creator},{now},{victim})")
+            vars.con.commit()
+            return cur.lastrowid
+        except Exception:
+            # Игнорируем ошибки вставки (сеть/БД) — критично, но игра продолжит
+            return None
+
+    def create_local_explosion(self, x, y, victim=None):
+        # Локальное создание визуального взрыва и воспроизведение звука
+        if victim is None or victim not in self.explosions:
+            explosion = Boom(x, y, scale=25)
+            self.local_explosions.append(explosion)
+            px = self.player.center_x
+            py = self.player.center_y
+            dist = math.hypot(px - x, py - y)
+            vol = max(0.0, min(1.0, 1.0 - (dist / self.max_hear_distance)))
+            arcade.play_sound(self.boom_sound, volume=vol)
+            self.explosions.add(victim)
+
+    def on_hide_view(self):
+        # Остановить музыку при скрытии представления
+        arcade.stop_sound(self.backgound_player)
 
     def on_update(self, delta_time):
-        cur = vars.con.cursor()
-        lstk = cur.execute(f"SELECT * FROM `session` WHERE `game` = {self.game}").fetchall()
-        self.planes_list.clear()
-        for lst in lstk:
-            if lst[1] != vars.id:
-                k = lst[3]
-                if k == 0:
-                    texture = "F-15.png"
-                x = lst[5]
-                y = lst[6]
-                vx = lst[7]
-                vy = lst[8]
-                plane = Plane(texture, x, y)
-                plane.vx = vx
-                plane.vy = vy
-                self.planes_list.append(plane)
-            else:
-                self.player.update(delta_time)
-                if self.up:
-                    self.player.vx *= 1.25
-                    self.player.vy *= 1.25
-                if self.down:
-                    self.player.vx //= 1.25
-                    self.player.vy //= 1.25
-                if self.left:
-                    self.player.rotate(3)
-                if self.right:
-                    self.player.rotate(-3)
-                self.planes_list.append(self.player)
-                texture = 0
-                x = self.player.center_x
-                y = self.player.center_y
-                vx = self.player.vx
-                vy = self.player.vy
-                cur = vars.con.cursor()
-                cur.execute(f"UPDATE `session` SET `x` = {x}, `y` = {y}, `vx` = {vx}, `vy` = {vy}"
-                            + f" WHERE `game` = {self.game} AND `player` = {vars.id}")
-                vars.con.commit()
-                position = (
-                    self.player.center_x,
-                    self.player.center_y
-                )
-                self.world_camera.position = arcade.math.lerp_2d(  # Изменяем позицию камеры
-                    self.world_camera.position,
-                    position,
-                    1,  # Плавность следования камеры
-                )
-        for el in self.missiles_list:
-            el.update(delta_time)
-        lst = cur.execute(f"SELECT * FROM `shouting` WHERE `game` = {self.game}").fetchall()
-        for el in lst:
-            if el[0] not in self.was_shouted:
-                missile = Missile(el[8], el[5], el[6], el[3], el[4], el[7])
-                missile.sender = el[1]
-                self.missiles_list.append(missile)
-                self.was_shouted.append(el[0])
-        stolk = arcade.check_for_collision_with_list(self.player, self.missiles_list)
-        for el in stolk:
-            if el.sender != vars.id:
-                self.disconnect()
-        stolk = arcade.check_for_collision_with_list(self.player, self.planes_list)
-        if len(stolk) != 0:
-            self.disconnect()
+        # Основная логика обновления состояния игры, синхронизация с БД
+        try:
+            cur = vars.con.cursor()
+            rows = cur.execute(f"SELECT * FROM session WHERE game = {self.game}").fetchall()
+            self.planes_list.clear()
+            current_pids = set()
+            local_present = False
+            for r in rows:
+                pid = r[1]
+                if pid != vars.id:
+                    # Создаём спрайт для других игроков и обновляем метаданные
+                    tex = "F-15"
+                    plane = Plane(tex, r[5], r[6])
+                    plane.player_id = pid
+                    if r[4]:
+                        plane.scale_x = -1
+                    plane.set_speed(r[7])
+                    plane.rotate(r[8])
+                    self.planes_list.append(plane)
+                    current_pids.add(pid)
+                    # Кеширование никнейма
+                    name = self.nick_cache.get(pid)
+                    if name is None:
+                        row = cur.execute(f"SELECT nickname FROM users WHERE id = {pid}").fetchone()
+                        name = row[0] if row and row[0] else f"Player{pid}"
+                        self.nick_cache[pid] = name
+                    try:
+                        hp = int(r[9]) if len(r) > 9 and r[9] is not None else 100
+                    except Exception:
+                        hp = 100
+                    self.other_players[pid] = {'world_x': plane.center_x, 'world_y': plane.center_y + plane.height / 2 + 8, 'team': r[4], 'name': name, 'hp': hp, 'screen_x': 0, 'screen_y': 0}
+                    # Метки имён
+                    if pid not in self.name_labels:
+                        col = arcade.color.BLUE if r[4] == 0 else arcade.color.RED
+                        r_, g_, b_ = col[0], col[1], col[2]
+                        self.name_labels[pid] = pyglet.text.Label(name, font_name="Arial", font_size=12, x=0, y=0, anchor_x='center', anchor_y='bottom', color=(r_, g_, b_, 255), batch=self.name_batch)
+                    else:
+                        lbl = self.name_labels[pid]
+                        lbl.text = name
+                    # След частицы за самолётом
+                    if pid in self.emitters_by_pid:
+                        em = self.emitters_by_pid[pid]
+                        em.attached = plane
+                    else:
+                        em = make_trail(plane, maintain=100)
+                        em.attached = plane
+                        self.emitters.append(em)
+                        self.emitters_by_pid[pid] = em
+                else:
+                    # Локальный игрок — применяем управление и обновляем запись в БД
+                    local_present = True
+                    try:
+                        if len(r) > 9 and r[9] is not None:
+                            self.local_hp = int(r[9])
+                    except Exception:
+                        pass
+                    self.player.update(delta_time)
+                    if self.up:
+                        self.player.vx *= 1.25
+                        self.player.vy *= 1.25
+                    if self.down:
+                        self.player.vx /= 1.25
+                        self.player.vy /= 1.25
+                    if self.left:
+                        self.player.rotate(3)
+                    if self.right:
+                        self.player.rotate(-3)
+                    self.player.player_id = vars.id
+                    self.planes_list.append(self.player)
+                    # Обновляем позицию в сессии
+                    cur.execute(f"UPDATE session SET x={self.player.center_x},y={self.player.center_y},v={self.player.v},angle={self.player.angle} WHERE game={self.game} AND player={vars.id}")
+                    vars.con.commit()
+                    # Центрируем камеру на игроке плавно
+                    self.world_camera.position = arcade.math.lerp_2d(self.world_camera.position, (self.player.center_x, self.player.center_y), 1)
+                    if vars.id in self.emitters_by_pid:
+                        em = self.emitters_by_pid[vars.id]
+                        em.attached = self.player
+                    else:
+                        em = make_trail(self.player, maintain=150)
+                        em.attached = self.player
+                        self.emitters.append(em)
+                        self.emitters_by_pid[vars.id] = em
+            if not local_present and self.alive_local:
+                # Если локального игрока нет в сессии — считаем, что он убит
+                self.alive_local = False
+                ex_x, ex_y = self.player.center_x, self.player.center_y
+                try:
+                    self.insert_explosion(cur, ex_x, ex_y, vars.id, vars.id)
+                except Exception:
+                    pass
+                if not self.dead_scheduled:
+                    self.dead_scheduled = True
+                    pyglet.clock.schedule_once(self.do_dead, self.time_to_dead)
+                return
+            if local_present and not self.alive_local:
+                self.alive_local = True
+            # Обновление HUD и проверка на победу
+            try:
+                w, h = self.window.width, self.window.height
+                self.hp_label.text = f"Здоровье: {self.local_hp}"
+                self.hp_label.x = 10
+                self.hp_label.y = h - 10
+                a = len(cur.execute(f"SELECT * FROM session WHERE game = {self.game} AND team = {self.team}").fetchall()) - 1
+                b = len(cur.execute(f"SELECT * FROM session WHERE game = {self.game} AND team <> {self.team}").fetchall())
+                self.friends_label.text = f"Живые союзники: {a}"
+                self.friends_label.x = w - 10
+                self.friends_label.y = h - 10
+                self.enemy_label.text = f"Живые враги: {b}"
+                self.enemy_label.x = w - 10
+                self.enemy_label.y = h - 30
+                try:
+                    if local_present:
+                        avv = (self.player.vmin + self.player.vmax) / 2
+                        vol = self.player.v / avv
+                        self.backgound_player.volume = vol
+                        # Если врагов не осталось — инициируем победу
+                        if b == 0 and not self.win_scheduled and not self.dead_scheduled:
+                            now = GLOBAL_CLOCK.time_since(0.0)
+                            row = cur.execute(f"SELECT created_at FROM explosions WHERE game={self.game} ORDER BY created_at DESC LIMIT 1").fetchone()
+                            recent = False
+                            if row and row[0] is not None and now - row[0] <= self.time_to_dead + 0.1:
+                                recent = True
+                            if not recent:
+                                ex, ey = self.player.center_x, self.player.center_y
+                                try:
+                                    self.insert_explosion(cur, ex, ey, vars.id, vars.id)
+                                except Exception:
+                                    pass
+                            self.win_scheduled = True
+                            extra_delay = self.time_to_dead
+                            def delayed_win_wrapper(dt):
+                                try:
+                                    self.do_win(dt)
+                                except Exception:
+                                    pass
+                            pyglet.clock.schedule_once(delayed_win_wrapper, self.time_to_dead + extra_delay)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            # Обработка эксплозий из БД — создание локальных визуальных эффектов
+            try:
+                elst = cur.execute(f"SELECT x, y, victim FROM explosions WHERE game={self.game}").fetchall()
+                for er in elst:
+                    x, y, pid = er
+                    self.create_local_explosion(x, y, victim=pid)
+            except Exception:
+                pass
+            for explosion in self.local_explosions:
+                explosion.update(delta_time)
+            # Столкновение снарядов с самолётами
+            missiles_to_remove = []
+            for missile in list(self.missiles_list):
+                for plane in list(self.planes_list):
+                    pid = plane.player_id if hasattr(plane, 'player_id') else None
+                    if pid is None or missile.sender == pid:
+                        continue
+                    if arcade.check_for_collision(missile, plane):
+                        missiles_to_remove.append(missile)
+                        try:
+                            victim = cur.execute(f"SELECT team,hp FROM session WHERE player={pid} AND game={self.game}").fetchone()
+                            if not victim:
+                                break
+                            victim_team, victim_hp = victim[0], victim[1] or 0
+                            new_hp = max(0, victim_hp - getattr(missile, 'damage', 1))
+                            if new_hp <= 0:
+                                try:
+                                    if pid == vars.id:
+                                        ex, ey = self.player.center_x, self.player.center_y
+                                    else:
+                                        info = self.other_players.get(pid)
+                                        ex = info['world_x'] if info else plane.center_x
+                                        ey = info['world_y'] if info else plane.center_y
+                                    self.insert_explosion(cur, ex, ey, missile.sender, pid)
+                                except Exception:
+                                    pass
+                            cur.execute(f"UPDATE session SET hp={new_hp} WHERE player={pid} AND game={self.game}")
+                            vars.con.commit()
+                            if new_hp <= 0:
+                                # Логи подсчёта фрагов/грязных френдов
+                                shooter_team = None
+                                if getattr(missile, 'sender', None) is not None:
+                                    srow = cur.execute(f"SELECT team FROM session WHERE player={missile.sender} AND game={self.game}").fetchone()
+                                    shooter_team = srow[0] if srow else None
+                                if missile.sender == vars.id:
+                                    if shooter_team is not None and shooter_team == victim_team:
+                                        self.kills_friends += 1
+                                    else:
+                                        self.kills_enemy += 1
+                                cur.execute(f"DELETE FROM session WHERE player={pid} AND game={self.game}")
+                                vars.con.commit()
+                                if pid == vars.id:
+                                    if not self.dead_scheduled:
+                                        self.dead_scheduled = True
+                                        pyglet.clock.schedule_once(self.do_dead, self.time_to_dead)
+                                    return
+                        except Exception:
+                            pass
+                        break
+            for m in missiles_to_remove:
+                try:
+                    self.missiles_list.remove(m)
+                except Exception:
+                    pass
+            # Столкновения самолётов друг с другом
+            sprite_pid_list = [(sp, getattr(sp, 'player_id', None)) for sp in self.planes_list]
+            to_delete = set()
+            n = len(sprite_pid_list)
+            for i in range(n):
+                s1, p1 = sprite_pid_list[i]
+                for j in range(i + 1, n):
+                    s2, p2 = sprite_pid_list[j]
+                    if p1 is None or p2 is None or p1 == p2:
+                        continue
+                    if arcade.check_for_collision(s1, s2):
+                        try:
+                            ex1 = self.other_players.get(p1, {}).get('world_x', s1.center_x)
+                            ey1 = self.other_players.get(p1, {}).get('world_y', s1.center_y)
+                            ex2 = self.other_players.get(p2, {}).get('world_x', s2.center_x)
+                            ey2 = self.other_players.get(p2, {}).get('world_y', s2.center_y)
+                            self.insert_explosion(cur, ex1, ey1, p1, p2)
+                            self.insert_explosion(cur, ex2, ey2, p2, p1)
+                        except Exception:
+                            pass
+                        if p1 == vars.id or p2 == vars.id:
+                            other = p2 if p1 == vars.id else p1
+                            try:
+                                cur.execute(f"DELETE FROM session WHERE player={other} AND game={self.game}")
+                                vars.con.commit()
+                            except Exception:
+                                pass
+                            if not self.dead_scheduled:
+                                self.dead_scheduled = True
+                                pyglet.clock.schedule_once(self.do_dead, self.time_to_dead)
+                            return
+                        to_delete.add(p1)
+                        to_delete.add(p2)
+            if to_delete:
+                try:
+                    placeholders = ','.join('?' for _ in to_delete)
+                    params = tuple(to_delete) + (self.game,)
+                    cur.execute(f"DELETE FROM session WHERE player IN ({placeholders}) AND game= ?", params)
+                    vars.con.commit()
+                except Exception:
+                    pass
+            # Удаление устаревших меток имён и эмиттеров
+            for pid in list(self.name_labels.keys()):
+                if pid not in current_pids:
+                    lbl = self.name_labels.pop(pid, None)
+                    try:
+                        if lbl and hasattr(lbl, 'delete'):
+                            lbl.delete()
+                    except Exception:
+                        pass
+                    self.nick_cache.pop(pid, None)
+                    self.other_players.pop(pid, None)
+                    em = self.emitters_by_pid.pop(pid, None)
+                    if em:
+                        try:
+                            self.emitters.remove(em)
+                        except Exception:
+                            pass
+            # Обновляем экранные позиции имён
+            for pid, info in self.other_players.items():
+                sx, sy = self.world_to_screen(info['world_x'], info['world_y'])
+                lbl = self.name_labels.get(pid)
+                if lbl:
+                    lbl.x = sx
+                    lbl.y = sy
+                info['screen_x'] = sx
+                info['screen_y'] = sy
+            for el in list(self.missiles_list):
+                el.update(delta_time)
+            # Загрузка новых выстрелов из таблицы shouting
+            lst = cur.execute(f"SELECT * FROM shouting WHERE game = {self.game}").fetchall()
+            for el in lst:
+                if el[0] not in self.was_shouted:
+                    missile = Missile(el[8], el[5], el[6], el[3], el[4], el[7])
+                    missile.sender = el[1]
+                    self.missiles_list.append(missile)
+                    self.was_shouted.append(el[0])
+            # Обновление эмиттеров частиц
+            emitters_copy = self.emitters.copy()
+            for e in emitters_copy:
+                attached = getattr(e, 'attached', None)
+                if attached is not None:
+                    try:
+                        e.center_xy = (attached.center_x, attached.center_y)
+                    except Exception:
+                        pass
+                e.update(delta_time)
+            for e in emitters_copy:
+                if e.can_reap():
+                    try:
+                        self.emitters.remove(e)
+                    except Exception:
+                        pass
+                    for pid, em in list(self.emitters_by_pid.items()):
+                        if em is e:
+                            self.emitters_by_pid.pop(pid, None)
+        except Exception:
+            # При критической ошибке — если мы хост, передаём хостинг и показываем LoseView
+            if self.is_owner:
+                self.transfer_host()
+            lose_view = LoseView(self.kills_friends, self.kills_enemy, GLOBAL_CLOCK.time_since(0.0), "Потеряно соединение")
+            self.manager.clear()
+            self.window.show_view(lose_view)
 
     def on_draw(self):
-        """Отрисовка начального экрана"""
+        # Отрисовка сцены: самолёты, снаряды, частицы, взрывы и HUD
         self.clear()
         self.world_camera.use()
         self.planes_list.draw()
         self.missiles_list.draw()
+        for e in self.emitters:
+            e.draw()
+        self.local_explosions.draw()
         self.gui_camera.use()
+        try:
+            self.hud_batch.draw()
+        except Exception:
+            pass
+        try:
+            self.name_batch.draw()
+        except Exception:
+            pass
+        try:
+            # Отрисовка полосок здоровья над игроками
+            for pid, info in self.other_players.items():
+                sx = info.get('screen_x')
+                sy = info.get('screen_y')
+                hp = info.get('hp', 100)
+                if sx is None or sy is None:
+                    continue
+                bar_w = 50
+                bar_h = 6
+                left = sx - bar_w / 2
+                right = sx + bar_w / 2
+                y_bar = sy - 6
+                top = y_bar + bar_h / 2
+                bottom = y_bar - bar_h / 2
+                arcade.draw_rect_filled(arcade.rect.LRBT(left, right, bottom, top), arcade.color.BLACK)
+                fg_w = int(bar_w * max(0, min(1, hp / 100)))
+                if fg_w > 0:
+                    left_fg = sx - bar_w / 2
+                    right_fg = left_fg + fg_w
+                    arcade.draw_rect_filled(arcade.rect.LRBT(left_fg, right_fg, bottom, top), arcade.color.DARK_RED)
+        except Exception:
+            pass
         self.manager.draw()
 
     def pause(self):
-        self.message_box = UIMessageBox(
-            width=300, height=200,
-            message_text="Пауза",
-            buttons=("Продолжить", "Выйти из игры")
-        )
+        # Показать окно паузы
+        self.message_box = UIMessageBox(width=300, height=200, message_text="Пауза", buttons=("Продолжить", "Выйти из игры"))
         self.message_box.on_action = self.stop_pause
         self.manager.add(self.message_box)
 
     def disconnect(self):
+        # Выход из игры: перенос хоста и удаление сессии
         if self.is_owner:
-            cur = vars.con.cursor()
-            cur.execute(f"DELETE FROM `games` WHERE `id` = {self.game}")
-            cur.execute(f"DELETE FROM `session` WHERE `game` = {self.game}")
-            cur.execute(f"DELETE FROM `shouting` WHERE `game` = {self.game}")
-            vars.con.commit()
-            from start import StartView
-            start_view = StartView()
-            self.window.show_view(start_view)
-        else:
-            cur = vars.con.cursor()
-            cur.execute(f"DELETE FROM `session` WHERE `player` = {vars.id}")
-            vars.con.commit()
-            from start import StartView
-            start_view = StartView()
-            self.window.show_view(start_view)
+            self.transfer_host()
+        cur = vars.con.cursor()
+        cur.execute(f"DELETE FROM session WHERE player = {vars.id}")
+        vars.con.commit()
+        lose_view = LoseView(self.kills_friends, self.kills_enemy, GLOBAL_CLOCK.time_since(0.0), "Выход из игры")
+        self.manager.clear()
+        self.window.show_view(lose_view)
 
     def stop_pause(self, btn):
+        # Обработка кнопок из окна паузы
         if btn.action == "Продолжить":
             self.is_pause = False
+            if self.message_box:
+                self.message_box.visible = False
         else:
             self.disconnect()
 
     def on_key_press(self, key, modifiers):
+        # Управление движением через клавиши
         if key == arcade.key.W or key == arcade.key.UP:
             self.up = True
         if key == arcade.key.A or key == arcade.key.LEFT:
@@ -151,6 +500,7 @@ class PvpView(arcade.View):
             self.right = True
 
     def on_key_release(self, key, modifiers):
+        # Сброс флагов управления и пауза
         if key == arcade.key.W or key == arcade.key.UP:
             self.up = False
         if key == arcade.key.A or key == arcade.key.LEFT:
@@ -161,27 +511,112 @@ class PvpView(arcade.View):
             self.right = False
         if key == arcade.key.ESCAPE:
             if self.is_pause:
-                self.message_box.visible = False
+                if self.message_box:
+                    self.message_box.visible = False
             else:
                 self.pause()
             self.is_pause = not self.is_pause
 
     def on_mouse_press(self, x, y, button, modifiers):
+        # Выстрел: создаём Missile, сохраняем в БД и локально добавляем
         missile = self.player.shoot()
         game = self.game
-        x = missile.center_x
-        y = missile.center_y
+        mx = missile.center_x
+        my = missile.center_y
         vx = missile.vx
         vy = missile.vy
         damage = missile.damage
         time = missile.time_left
         sender = vars.id
         cur = vars.con.cursor()
-        cur.execute("INSERT INTO `shouting` (`game`, `x`, `y`, `vx`, `vy`, `damage`, `time`, `player`"
-                    + f") VALUES ({game}, {x}, {y}, {vx}, {vy}, {damage}, {time}, {sender})")
+        cur.execute(f"INSERT INTO shouting (game,x,y,vx,vy,damage,time,player) VALUES ({game},{mx},{my},{vx},{vy},{damage},{time},{sender})")
         vars.con.commit()
+        missile.sender = sender
+        self.missiles_list.append(missile)
+        try:
+            last_id = cur.lastrowid
+            if last_id:
+                self.was_shouted.append(last_id)
+        except Exception:
+            pass
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        # Зум камеры колесом мыши
         self.world_camera.zoom += scroll_y * 0.1
         self.world_camera.zoom = min(1.0, self.world_camera.zoom)
         self.world_camera.zoom = max(0.03, self.world_camera.zoom)
+
+    def transfer_host(self):
+        # Передача прав хоста другому игроку (если есть)
+        cur = vars.con.cursor()
+        row = cur.execute(f"SELECT player FROM session WHERE game = {self.game} AND team = 0 AND player <> {vars.id}").fetchall()
+        if not row:
+            return
+        nid = row[0][0]
+        cur.execute(f"UPDATE games SET owner = {nid} WHERE id = {self.game}")
+        vars.con.commit()
+        self.is_owner = False
+
+    def schedule_dead(self):
+        # Запланировать смерть немедленно (если ещё не запланирована)
+        if self.dead_scheduled:
+            return
+        self.dead_scheduled = True
+        pyglet.clock.schedule_once(self.do_dead, 0.0)
+
+    def do_dead(self, dt):
+        # Обработка смерти локального игрока: удаляем сессию и показываем LoseView
+        try:
+            if self.is_owner:
+                self.transfer_host()
+            cur = vars.con.cursor()
+            cur.execute(f"DELETE FROM session WHERE player = {vars.id}")
+            vars.con.commit()
+        except Exception:
+            pass
+        lose_view = LoseView(self.kills_friends, self.kills_enemy, GLOBAL_CLOCK.time_since(self.time_start), "Ваш самолёт уничтожен")
+        self.manager.clear()
+        self.window.show_view(lose_view)
+
+    def do_win(self, dt):
+        # Обработка победы: удаляем сессию и показываем WinView
+        try:
+            if self.is_owner:
+                self.transfer_host()
+        except Exception:
+            pass
+        cur = vars.con.cursor()
+        cur.execute(f"DELETE FROM session WHERE player = {vars.id}")
+        vars.con.commit()
+        win_view = WinView(self.kills_friends, self.kills_enemy, GLOBAL_CLOCK.time_since(self.time_start))
+        self.manager.clear()
+        self.window.show_view(win_view)
+
+    def dead(self):
+        self.schedule_dead()
+
+
+def make_trail(attached_sprite, maintain=100):
+    # Создаём эмиттер частиц, привязанный к спрайту
+    emit = Emitter(
+        center_xy=(attached_sprite.center_x, attached_sprite.center_y),
+        emit_controller=EmitMaintainCount(maintain),
+        particle_factory=lambda e: FadeParticle(
+            filename_or_texture=random.choice(SPARK_TEX),
+            change_xy=arcade.math.rand_in_circle((0.0, 0.0), attached_sprite.height // 2),
+            lifetime=random.uniform(0.35, 0.6),
+            start_alpha=220, end_alpha=0,
+            scale=random.uniform(0.25, 0.4),
+        ),
+    )
+    emit.attached = attached_sprite
+    return emit
+
+
+SPARK_TEX = [
+    arcade.make_soft_circle_texture(32, arcade.color.GRAY),
+    arcade.make_soft_circle_texture(32, arcade.color.DARK_GRAY),
+    arcade.make_soft_circle_texture(32, arcade.color.LIGHT_GRAY),
+    arcade.make_soft_circle_texture(32, arcade.color.BLUE_GRAY),
+    arcade.make_soft_circle_texture(32, arcade.color.DARK_BLUE_GRAY)
+]

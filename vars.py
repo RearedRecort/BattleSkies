@@ -1,7 +1,5 @@
 import sqlite3
 
-import arcade
-
 
 def shifr(a):
     return 17 * (13 + int(bin((((a * 5 + 1) * 2 - 3) * 7 + 1) // 2)[2:]))
@@ -42,8 +40,17 @@ def clear_sessions():
         if k == 0:
             cur.execute(f"DELETE FROM `games` WHERE `id` = {idg}")
             cur.execute(f"DELETE FROM `shouting` WHERE `game` = {idg}")
+            cur.execute(f"DELETE FROM `explosions` WHERE `game` = {idg}")
     con.commit()
+
+def add_money(n):
+    global money, con, id
+    money += n
+    cur = con.cursor()
+    cur.execute(f"UPDATE `users` SET `money` = {money} WHERE `id` = {id}")
 
 id = 0
 con = sqlite3.connect("BattleSkies.db")
 money = 0
+images_count = 80
+plane = 0

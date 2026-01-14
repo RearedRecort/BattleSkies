@@ -28,6 +28,7 @@ class LobbyPvpView(arcade.View):
         self.manager.add(self.anchor_layout)  # Всё в manager
 
         self.all_sprites = arcade.SpriteList()
+        self.joined = False
 
     def on_draw(self):
         """Отрисовка начального экрана"""
@@ -47,14 +48,12 @@ class LobbyPvpView(arcade.View):
             nick = cur.execute(f"SELECT `nickname` FROM `users` WHERE `id` = {id}").fetchall()[0][0]
             lbl = UILabel(text=nick, font_size=15, text_color=color, align="center")
             self.players_list.add(lbl)
-        if not self.is_owner:
+        if not self.joined:
             prv = cur.execute(f"SELECT `private` FROM `games` WHERE `id` = {self.game}").fetchall()[0][0]
             if prv == 2:
                 x, y, t = cur.execute("SELECT `x`, `y`, `team`" +
                                       f"FROM `session` WHERE `player` = {vars.id}").fetchall()[0]
-                pvp_view = PvpView(False, self.game, x, y, t)
-                self.manager.clear()
-                self.window.show_view(pvp_view)
+                self.play(x, y, t)
 
     def setup_widgets(self):
         label = UILabel(text="ЛОББИ (PVP)", font_size=30, text_color=arcade.color.BLACK, width=300, align="center")
@@ -79,20 +78,27 @@ class LobbyPvpView(arcade.View):
         self.window.show_view(hub_view)
 
     def go(self, event):
+        self.joined = True
         cur = vars.con.cursor()
         cur.execute(f"UPDATE `games` SET `private` = 2 WHERE `id` = {self.game}")
         lst = cur.execute(f"SELECT `id` FROM `session` WHERE `game` = {self.game} AND `team` = 0").fetchall()
         y = 1000
         for el in lst:
-            cur.execute(f'UPDATE `session` SET `y` = {y}, `x` = {-100} WHERE `id` = {el[0]}')
+            cur.execute(f'UPDATE `session` SET `y` = {y}, `x` = {-5000}, `angle` = 0 WHERE `id` = {el[0]}')
             y += 100
         lst = cur.execute(f"SELECT `id` FROM `session` WHERE `game` = {self.game} AND `team` = 1").fetchall()
         y = 1000
         for el in lst:
-            cur.execute(f'UPDATE `session` SET `y` = {y}, `x` = {100} WHERE `id` = {el[0]}')
+            cur.execute(f'UPDATE `session` SET `y` = {y}, `x` = {5000}, `angle` = 180 WHERE `id` = {el[0]}')
             y += 100
         vars.con.commit()
         x, y = cur.execute(f"SELECT `x`, `y` FROM `session` WHERE `player` = {vars.id}").fetchall()[0]
         pvp_view = PvpView(True, self.game, x, y, 0)
+        self.manager.clear()
+        self.window.show_view(pvp_view)
+
+    def play(self, x, y, t):
+        pvp_view = PvpView(False, self.game, x, y, t)
+        self.joined = True
         self.manager.clear()
         self.window.show_view(pvp_view)
