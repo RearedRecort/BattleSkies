@@ -1,196 +1,255 @@
-import arcade
+import math
 import random
+import arcade
 
-from arcade.gui import UIManager, UIMessageBox
 from Missile import Missile
 from Plane import Plane
 from Bot import Bot
-from start import StartView
+from lose import LoseView
 
 
 class PveView(arcade.View):
-    def __init__(self, plane_texture, start_x, start_y):
+
+    def __init__(self, plane_index: int = 0):
         super().__init__()
-        arcade.set_background_color(arcade.color.LIGHT_GREEN)
 
-        self.world_camera = arcade.Camera2D(zoom=0.5)
-        self.gui_camera = arcade.Camera2D()
+        # Список всех доступных моделей самолётов
+        self.plane_types = [
+            "F-15", "F-16", "J-35", "J-39",
+            "MiG-31", "MiG-29", "Su-27", "Su-47"
+        ]
 
-        self.manager = UIManager()
-        self.manager.enable()
+        self.plane_type = self.plane_types[plane_index % len(self.plane_types)]
 
-        self.planes_list = arcade.SpriteList()
-        self.missiles_list = arcade.SpriteList()
+        arcade.set_background_color(arcade.color.DARK_GREEN)
 
-        # Игрок
-        self.player = Plane(plane_texture, start_x, start_y)
-        self.planes_list.append(self.player)
+        # Камеры
+        self.world_camera = arcade.Camera2D()
+        self.gui_camera   = arcade.Camera2D()
 
-        self.left = False
-        self.right = False
-        self.up = False
-        self.down = False
-        self.is_pause = False
+        # Начальный масштаб и границы зума
+        self.world_camera.zoom = 0.8
+        self.min_zoom = 0.4
+        self.max_zoom = 1.8
 
-        # Бот и респавн
-        self.current_bot = None
-        self.bot_spawn_timer = 0
-        self.bot_spawn_delay = 2.0  # секунды задержки между спавнами
+        # Основные списки спрайтов (взрывы убраны)
+        self.planes   = arcade.SpriteList()
+        self.missiles = arcade.SpriteList()
 
-        self.spawn_new_bot()
+        # Игрок в центре экрана
+        w, h = self.window.width, self.window.height
+        self.player = Plane(self.plane_type, w // 2, h // 2, max_health=120)
+        self.planes.append(self.player)
 
-    def spawn_new_bot(self):
-        # Случайное появление бота где-то подальше от игрока
-        side = random.choice([-1, 1])
-        spawn_x = self.player.center_x + random.randint(600, 1200) * side
-        spawn_y = random.randint(200, 1000)
+        # Управление
+        self.keys = {"left": False, "right": False, "up": False, "down": False}
 
-        self.current_bot = Bot(
-            "F-15",
-            spawn_x,
-            spawn_y,
+        # Боты
+        self.bots = []
+        self.bot_spawn_timer = 0.0
+        self.bot_spawn_interval = 3.5
+        self.max_bots = 6
+
+        self.score = 0
+        self.time_alive = 0.0
+
+        # Первый бот сразу
+        self.spawn_bot()
+
+    def spawn_bot(self):
+        if len(self.bots) >= self.max_bots:
+            return
+
+        margin = 800
+        w, h = self.window.width, self.window.height
+
+        side = random.choice(["left", "right", "top", "bottom"])
+
+        if side == "left":
+            x = -margin
+            y = random.uniform(-margin, h + margin)
+        elif side == "right":
+            x = w + margin
+            y = random.uniform(-margin, h + margin)
+        elif side == "top":
+            x = random.uniform(-margin, w + margin)
+            y = h + margin
+        else:
+            x = random.uniform(-margin, w + margin)
+            y = -margin
+
+        bot = Bot(
+            plane_type=random.choice(self.plane_types),
+            xcoor=x,
+            ycoor=y,
             target=self.player,
-            max_health=80
+            max_health=80 + int(self.score * 0.4)
         )
-        self.current_bot.turn_rate = 180
-        self.current_bot.shoot_interval = 1.8
-        self.planes_list.append(self.current_bot)
 
-    def on_update(self, delta_time):
+        bot.turn_rate = 140 + self.score * 1.2
+        bot.shoot_interval = max(1.2, 2.2 - self.score * 0.015)
+
+        self.bots.append(bot)
+        self.planes.append(bot)
+
+    def on_update(self, delta_time: float):
+        self.time_alive += delta_time
+
         # Управление игроком
+        turn_speed = 220
+        accel = 380
+        decel = 140
+
+        if self.keys["left"]:
+            self.player.rotate(turn_speed * delta_time)
+        if self.keys["right"]:
+            self.player.rotate(-turn_speed * delta_time)
+        if self.keys["up"]:
+            self.player.v = min(self.player.v + accel * delta_time, 1800)
+        if self.keys["down"]:
+            self.player.v = max(self.player.v - decel * delta_time, 320)
+
         self.player.update(delta_time)
 
-        if self.up:
-            self.player.vx *= 1.25
-            self.player.vy *= 1.25
-        if self.down:
-            self.player.vx //= 1.25
-            self.player.vy //= 1.25
-        if self.left:
-            self.player.rotate(3)
-        if self.right:
-            self.player.rotate(-3)
+        # Спавн ботов
+        self.bot_spawn_timer += delta_time
+        if self.bot_spawn_timer >= self.bot_spawn_interval:
+            self.spawn_bot()
+            self.bot_spawn_timer = 0.0
 
-        # Камера следует за игроком
-        self.world_camera.position = (
-            self.player.center_x,
-            self.player.center_y
-        )
+        # Обновление ботов
+        for bot in self.bots[:]:
+            bot.update(delta_time)
 
-        # Обновление бота
-        if self.current_bot and self.current_bot.alive:
-            self.current_bot.update(delta_time)
+            if bot.target and bot.target.alive and bot.shoot_cooldown <= 0:
+                dx = bot.target.center_x - bot.center_x
+                dy = bot.target.center_y - bot.center_y
+                target_angle = math.degrees(math.atan2(dy, dx))
+                diff = (target_angle - bot.angle + 180) % 360 - 180
 
-            # Бот стреляет -> добавляем ракету
-            if self.current_bot.shoot_cooldown <= 0:
-                missile = self.current_bot.shoot()
-                if missile:
-                    self.missiles_list.append(missile)
-                    self.current_bot.shoot_cooldown = self.current_bot.shoot_interval
+                if abs(diff) < 12:
+                    missile = bot.shoot()
+                    self.missiles.append(missile)
+                    bot.shoot_cooldown = bot.shoot_interval
 
-        # Обновляем все ракеты
-        self.missiles_list.update(delta_time)
+            if not bot.alive:
+                # Взрыв убран — просто считаем очко и удаляем
+                self.score += 1
+                self.bots.remove(bot)
+                bot.kill()
 
-        # Проверяем попадания
-        # 1. Ракеты -> игрок
-        hits_player = arcade.check_for_collision_with_list(self.player, self.missiles_list)
-        for missile in hits_player:
-            if hasattr(missile, 'sender') and missile.sender == "bot":  # чтобы не попадали свои
+        # Ракеты
+        for missile in self.missiles[:]:
+            missile.update(delta_time)
+
+            if missile.collides_with_sprite(self.player):
                 self.player.take_damage(missile.damage)
                 missile.kill()
+                if self.player.health <= 0:
+                    self.game_over()
 
-        # 2. Ракеты -> бот
-        if self.current_bot and self.current_bot.alive:
-            hits_bot = arcade.check_for_collision_with_list(self.current_bot, self.missiles_list)
-            for missile in hits_bot:
-                if hasattr(missile, 'sender') and missile.sender == "player":
-                    self.current_bot.take_damage(missile.damage)
+            for bot in self.bots:
+                if missile.collides_with_sprite(bot):
+                    bot.take_damage(missile.damage)
                     missile.kill()
+                    break
 
-        # Бот умер -> запускаем таймер респавна
-        if self.current_bot and not self.current_bot.alive:
-            self.current_bot.remove_from_sprite_lists()
-            self.current_bot = None
-            self.bot_spawn_timer = self.bot_spawn_delay
+            if missile.time_left <= 0:
+                missile.kill()
 
-        # Таймер респавна
-        if self.bot_spawn_timer > 0:
-            self.bot_spawn_timer -= delta_time
-            if self.bot_spawn_timer <= 0:
-                self.spawn_new_bot()
+        # Камера плавно следует за игроком
+        target_x = self.player.center_x
+        target_y = self.player.center_y
 
-        # Игрок умер -> конец игры
-        if not self.player.alive:
-            self.game_over()
+        self.world_camera.position = arcade.math.lerp_2d(
+            self.world_camera.position,
+            (target_x, target_y),
+            0.15
+        )
+
+        # Усложнение со временем
+        if self.time_alive > 60:
+            self.bot_spawn_interval = max(1.8, 3.5 - (self.time_alive - 60) * 0.02)
+            self.max_bots = min(10, 6 + int((self.time_alive - 60) // 45))
+
+    def game_over(self):
+        view = LoseView(
+            kills_friends=0,
+            kills_enemy=self.score,
+            time=self.time_alive,
+            reason="Ваш самолёт сбит"
+        )
+        self.window.show_view(view)
 
     def on_draw(self):
         self.clear()
+
+        # Активируем камеру мира
         self.world_camera.use()
-        self.planes_list.draw()
-        self.missiles_list.draw()
 
-        # Здоровье игрока
+        self.planes.draw()
+        self.missiles.draw()
+
+        # Переключаемся на камеру интерфейса
         self.gui_camera.use()
+
+        # HUD
         arcade.draw_text(
-            f"HP: {self.player.health}/{self.player.max_health}",
-            20, 40, arcade.color.BLACK, 18
+            f"Здоровье: {int(self.player.health)} / {self.player.max_health}",
+            20, self.window.height - 40,
+            arcade.color.WHITE, 18, font_name="Kenney Future"
         )
-        self.manager.draw()
 
-    def game_over(self):
-        message = UIMessageBox(
-            width=400,
-            height=250,
-            message_text="ИГРА ОКОНЧЕНА\nВы были сбиты!",
-            buttons=["В меню"]
+        arcade.draw_text(
+            f"Сбито: {self.score}",
+            20, self.window.height - 70,
+            arcade.color.LIME_GREEN, 18, font_name="Kenney Future"
         )
-        message.on_action = lambda btn: self.window.show_view(StartView())
-        self.manager.add(message)
 
-    def pause(self):
-        self.message_box = UIMessageBox(
-            width=300, height=200,
-            message_text="ПАУЗА",
-            buttons=("Продолжить", "Выйти в меню")
+        minutes = int(self.time_alive // 60)
+        seconds = int(self.time_alive % 60)
+        arcade.draw_text(
+            f"Время: {minutes:02d}:{seconds:02d}",
+            20, self.window.height - 100,
+            arcade.color.WHITE_SMOKE, 16
         )
-        self.message_box.on_action = self.stop_pause
-        self.manager.add(self.message_box)
 
-    def stop_pause(self, btn):
-        if btn.action == "Продолжить":
-            self.is_pause = False
-        else:
-            from start import StartView
-            self.window.show_view(StartView())
+        arcade.draw_text(
+            f"Самолёт: {self.plane_type}",
+            self.window.width - 220, self.window.height - 40,
+            arcade.color.CYAN, 16,
+            anchor_x="right"
+        )
 
     def on_key_press(self, key, modifiers):
-        if key == arcade.key.W or key == arcade.key.UP:
-            self.up = True
-        if key == arcade.key.S or key == arcade.key.DOWN:
-            self.down = True
-        if key == arcade.key.A or key == arcade.key.LEFT:
-            self.left = True
-        if key == arcade.key.D or key == arcade.key.RIGHT:
-            self.right = True
+        if key in (arcade.key.A, arcade.key.LEFT):
+            self.keys["left"] = True
+        if key in (arcade.key.D, arcade.key.RIGHT):
+            self.keys["right"] = True
+        if key in (arcade.key.W, arcade.key.UP):
+            self.keys["up"] = True
+        if key in (arcade.key.S, arcade.key.DOWN):
+            self.keys["down"] = True
+
         if key == arcade.key.ESCAPE:
-            if self.is_pause:
-                self.message_box.visible = False
-            else:
-                self.pause()
-            self.is_pause = not self.is_pause
+            self.window.close()
 
     def on_key_release(self, key, modifiers):
-        if key == arcade.key.W or key == arcade.key.UP:
-            self.up = False
-        if key == arcade.key.S or key == arcade.key.DOWN:
-            self.down = False
-        if key == arcade.key.A or key == arcade.key.LEFT:
-            self.left = False
-        if key == arcade.key.D or key == arcade.key.RIGHT:
-            self.right = False
+        if key in (arcade.key.A, arcade.key.LEFT):
+            self.keys["left"] = False
+        if key in (arcade.key.D, arcade.key.RIGHT):
+            self.keys["right"] = False
+        if key in (arcade.key.W, arcade.key.UP):
+            self.keys["up"] = False
+        if key in (arcade.key.S, arcade.key.DOWN):
+            self.keys["down"] = False
 
     def on_mouse_press(self, x, y, button, modifiers):
         if button == arcade.MOUSE_BUTTON_LEFT:
             missile = self.player.shoot()
-            missile.sender = "player"          # метка, что это ракета игрока
-            self.missiles_list.append(missile)
+            self.missiles.append(missile)
+
+    def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        zoom_change = scroll_y * 0.12
+        self.world_camera.zoom += zoom_change
+        self.world_camera.zoom = max(self.min_zoom, min(self.max_zoom, self.world_camera.zoom))
