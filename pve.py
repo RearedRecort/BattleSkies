@@ -133,7 +133,6 @@ class PveView(arcade.View):
                     bot.shoot_cooldown = bot.shoot_interval
 
             if not bot.alive:
-                # Взрыв убран — просто считаем очко и удаляем
                 self.score += 1
                 self.bots.remove(bot)
                 bot.kill()
@@ -250,6 +249,7 @@ class PveView(arcade.View):
             self.missiles.append(missile)
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
-        zoom_change = scroll_y * 0.12
-        self.world_camera.zoom += zoom_change
-        self.world_camera.zoom = max(self.min_zoom, min(self.max_zoom, self.world_camera.zoom))
+        # Зум камеры колесом мыши
+        self.world_camera.zoom += scroll_y * 0.1
+        self.world_camera.zoom = min(1.0, self.world_camera.zoom)
+        self.world_camera.zoom = max(0.03, self.world_camera.zoom)
