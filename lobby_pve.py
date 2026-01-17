@@ -1,8 +1,10 @@
+import random
 import vars
 import arcade
 
 from arcade.gui import UIManager, UIFlatButton, UILabel, UISlider, UIDropdown
 from arcade.gui.widgets.layout import UIAnchorLayout, UIBoxLayout
+from pvb import PvbView
 
 
 class LobbyPveView(arcade.View):
@@ -66,5 +68,23 @@ class LobbyPveView(arcade.View):
         self.window.show_view(hub_view)
 
     def go(self, event):
-        pass
+        self.joined = True
+        cur = vars.con.cursor()
+        cur.execute(f"UPDATE `games` SET `private` = 2 WHERE `id` = {self.game}")
+        lst = cur.execute(f"SELECT `id` FROM `session` WHERE `game` = {self.game} AND `team` = 0").fetchall()
+        k = len(lst)
+        y = 1000
+        for el in lst:
+            cur.execute(f'UPDATE `session` SET `y` = {y}, `x` = {-5000}, `angle` = 0 WHERE `id` = {el[0]}')
+            y += 100
+        y = 1000
+        for i in range(k):
+            cur.execute(f'INSERT INTO `session` (`x`, `y`, `angle`, `player`, `game`, `plane`) VALUES (5000, {y}, 180, 0, {self.game}, {0})')
+            # random.randint(0, 7)
+            y += 100
+        vars.con.commit()
+        x, y = cur.execute(f"SELECT `x`, `y` FROM `session` WHERE `player` = {vars.id}").fetchall()[0]
+        pvb_view = PvbView(True, self.game, x, y, 0)
+        self.manager.clear()
+        self.window.show_view(pvb_view)
 

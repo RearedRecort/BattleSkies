@@ -79,3 +79,6 @@ class SettingsView(arcade.View):
         print(0, file=file)
         file.close()
         self.bck(event)
+
+    def on_hide_view(self):
+        self.manager.clear()

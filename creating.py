@@ -65,15 +65,6 @@ class CreatingView(arcade.View):
         self.mp_layout.add(mp_label)
         self.mp_layout.add(self.mp)
         self.box_layout.add(self.mp_layout)
-        self.mode_layout = UIBoxLayout(vertical=False, space_between=5)
-        mode_label = UILabel(text="Режим:", font_size=15,
-                           text_color=arcade.color.BLACK, align="right")
-        self.mode = UIDropdown(x=0, y=0, width=(395 - mode_label.width),
-                             height=40, options=["PVP", "PVE"])
-        self.mode.value = "PVP"
-        self.mode_layout.add(mode_label)
-        self.mode_layout.add(self.mode)
-        self.box_layout.add(self.mode_layout)
         self.prv_layout = UIBoxLayout(vertical=False, space_between=5)
         prv_label = UILabel(text="Сервер:", font_size=15,
                              text_color=arcade.color.BLACK, align="right")
@@ -103,9 +94,7 @@ class CreatingView(arcade.View):
         prv = 1
         if self.prv.value == "Публичный":
             prv = 0
-        mode = 0
-        if self.mode.value == "PVP":
-            mode = 1
+        mode = 1
         mp = 1
         if self.mp.value == "Горы":
             mp = 2
@@ -115,7 +104,7 @@ class CreatingView(arcade.View):
         cur.execute(s + f") VALUES ({mp}, {count}, {vars.id}, {mode}, '{code}', {prv})")
         vars.con.commit()
         game_id = cur.execute(f"SELECT `id` FROM `games` WHERE `code` = '{code}'").fetchall()[0][0]
-        cur.execute(f"INSERT INTO `session` (`player`, `game`, `plane`) VALUES ({vars.id}, {game_id}, 0)")
+        cur.execute(f"INSERT INTO `session` (`player`, `game`, `plane`) VALUES ({vars.id}, {game_id}, {vars.plane})")
         vars.con.commit()
         if mode:
             lobby_view = LobbyPvpView(True, game_id)
@@ -127,3 +116,6 @@ class CreatingView(arcade.View):
         from hub import HubView
         hub_view = HubView()
         self.window.show_view(hub_view)
+
+    def on_hide_view(self):
+        self.manager.clear()

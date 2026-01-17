@@ -84,3 +84,6 @@ class LoseView(arcade.View):
         from start import StartView
         start_view = StartView()
         self.window.show_view(start_view)
+
+    def on_hide_view(self):
+        self.manager.clear()

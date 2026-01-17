@@ -118,3 +118,6 @@ class ChangingView(arcade.View):
         from settings import SettingsView
         settings_view = SettingsView()
         self.window.show_view(settings_view)
+
+    def on_hide_view(self):
+        self.manager.clear()

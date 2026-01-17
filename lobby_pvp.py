@@ -102,3 +102,6 @@ class LobbyPvpView(arcade.View):
         self.joined = True
         self.manager.clear()
         self.window.show_view(pvp_view)
+
+    def on_hide_view(self):
+        self.manager.clear()

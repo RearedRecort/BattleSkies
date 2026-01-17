@@ -34,7 +34,7 @@ class PvpView(arcade.View):
         self.planes_list = arcade.SpriteList()
         self.missiles_list = arcade.SpriteList()
         # Основной игрок
-        self.player = Plane("F-15", x, y)
+        self.player = Plane(SKIN_MAP[vars.plane], x, y)
         if team:
             self.player.scale_x = -1
         else:
@@ -83,11 +83,11 @@ class PvpView(arcade.View):
         zoom = self.world_camera.zoom
         return (x - cam_x) * zoom + win_w / 2, (y - cam_y) * zoom + win_h / 2
 
-    def insert_explosion(self, cur, x, y, creator, victim):
+    def insert_explosion(self, cur, x, y, creator, victim, team):
         # Вставка записи об взрыве в БД
         try:
             now = GLOBAL_CLOCK.time_since(0.0)
-            cur.execute(f"INSERT INTO explosions (game,x,y,ttl,created_by,created_at,victim) VALUES ({self.game},{x},{y},{self.time_to_dead},{creator},{now},{victim})")
+            cur.execute(f"INSERT INTO explosions (game,x,y,ttl,created_by,created_at,victim,team) VALUES ({self.game},{x},{y},{self.time_to_dead},{creator},{now},{victim},{team})")
             vars.con.commit()
             return cur.lastrowid
         except Exception:
@@ -122,13 +122,17 @@ class PvpView(arcade.View):
                 pid = r[1]
                 if pid != vars.id:
                     # Создаём спрайт для других игроков и обновляем метаданные
-                    tex = "F-15"
+                    tex = SKIN_MAP[r[3]]
                     plane = Plane(tex, r[5], r[6])
                     plane.player_id = pid
+                    plane.team = r[4]
                     if r[4]:
                         plane.scale_x = -1
                     plane.set_speed(r[7])
-                    plane.rotate(r[8])
+                    ang = r[8]
+                    if plane.team:
+                        ang *= -1
+                    plane.rotate(ang)
                     self.planes_list.append(plane)
                     current_pids.add(pid)
                     # Кеширование никнейма
@@ -198,7 +202,7 @@ class PvpView(arcade.View):
                 self.alive_local = False
                 ex_x, ex_y = self.player.center_x, self.player.center_y
                 try:
-                    self.insert_explosion(cur, ex_x, ex_y, vars.id, vars.id)
+                    self.insert_explosion(cur, ex_x, ex_y, vars.id, vars.id, self.team)
                 except Exception:
                     pass
                 if not self.dead_scheduled:
@@ -236,7 +240,7 @@ class PvpView(arcade.View):
                             if not recent:
                                 ex, ey = self.player.center_x, self.player.center_y
                                 try:
-                                    self.insert_explosion(cur, ex, ey, vars.id, vars.id)
+                                    self.insert_explosion(cur, ex, ey, vars.id, vars.id, self.team)
                                 except Exception:
                                     pass
                             self.win_scheduled = True
@@ -284,7 +288,7 @@ class PvpView(arcade.View):
                                         info = self.other_players.get(pid)
                                         ex = info['world_x'] if info else plane.center_x
                                         ey = info['world_y'] if info else plane.center_y
-                                    self.insert_explosion(cur, ex, ey, missile.sender, pid)
+                                    self.insert_explosion(cur, ex, ey, missile.sender, pid, victim_team)
                                 except Exception:
                                     pass
                             cur.execute(f"UPDATE session SET hp={new_hp} WHERE player={pid} AND game={self.game}")
@@ -331,8 +335,8 @@ class PvpView(arcade.View):
                             ey1 = self.other_players.get(p1, {}).get('world_y', s1.center_y)
                             ex2 = self.other_players.get(p2, {}).get('world_x', s2.center_x)
                             ey2 = self.other_players.get(p2, {}).get('world_y', s2.center_y)
-                            self.insert_explosion(cur, ex1, ey1, p1, p2)
-                            self.insert_explosion(cur, ex2, ey2, p2, p1)
+                            self.insert_explosion(cur, ex1, ey1, p1, p2, p2.team)
+                            self.insert_explosion(cur, ex2, ey2, p2, p1, p1.team)
                         except Exception:
                             pass
                         if p1 == vars.id or p2 == vars.id:
@@ -475,6 +479,10 @@ class PvpView(arcade.View):
         cur = vars.con.cursor()
         cur.execute(f"DELETE FROM session WHERE player = {vars.id}")
         vars.con.commit()
+        self.kills_enemy = len(cur.execute(f"SELECT id FROM explosions WHERE created_by = {vars.id} AND team <> {self.team}").fetchall())
+        self.kills_friends = len(cur.execute(f"SELECT id FROM explosions WHERE created_by = {vars.id} AND team = {self.team}").fetchall())
+        cur.execute(f"DELETE FROM explosions WHERE created_by = {vars.id}")
+        vars.con.commit()
         lose_view = LoseView(self.kills_friends, self.kills_enemy, GLOBAL_CLOCK.time_since(0.0), "Выход из игры")
         self.manager.clear()
         self.window.show_view(lose_view)
@@ -523,8 +531,10 @@ class PvpView(arcade.View):
         game = self.game
         mx = missile.center_x
         my = missile.center_y
-        vx = missile.vx
-        vy = missile.vy
+        vx = abs(missile.vx) * vars.num_sign(self.player.vx)
+        missile.vx = vx
+        vy = abs(missile.vy) * vars.num_sign(self.player.vy)
+        missile.vy = vy
         damage = missile.damage
         time = missile.time_left
         sender = vars.id
@@ -566,14 +576,18 @@ class PvpView(arcade.View):
 
     def do_dead(self, dt):
         # Обработка смерти локального игрока: удаляем сессию и показываем LoseView
+        cur = vars.con.cursor()
         try:
             if self.is_owner:
                 self.transfer_host()
-            cur = vars.con.cursor()
             cur.execute(f"DELETE FROM session WHERE player = {vars.id}")
             vars.con.commit()
         except Exception:
             pass
+        self.kills_enemy = len(cur.execute(f"SELECT id FROM explosions WHERE created_by = {vars.id} AND team <> {self.team}").fetchall())
+        self.kills_friends = len(cur.execute(f"SELECT id FROM explosions WHERE created_by = {vars.id} AND team = {self.team}").fetchall())
+        cur.execute(f"DELETE FROM explosions WHERE created_by = {vars.id}")
+        vars.con.commit()
         lose_view = LoseView(self.kills_friends, self.kills_enemy, GLOBAL_CLOCK.time_since(self.time_start), "Ваш самолёт уничтожен")
         self.manager.clear()
         self.window.show_view(lose_view)
@@ -587,6 +601,9 @@ class PvpView(arcade.View):
             pass
         cur = vars.con.cursor()
         cur.execute(f"DELETE FROM session WHERE player = {vars.id}")
+        self.kills_enemy = len(cur.execute(f"SELECT id FROM explosions WHERE created_by = {vars.id} AND team <> {self.team}").fetchall())
+        self.kills_friends = len(cur.execute(f"SELECT id FROM explosions WHERE created_by = {vars.id} AND team = {self.team}").fetchall())
+        cur.execute(f"DELETE FROM explosions WHERE created_by = {vars.id}")
         vars.con.commit()
         win_view = WinView(self.kills_friends, self.kills_enemy, GLOBAL_CLOCK.time_since(self.time_start))
         self.manager.clear()
@@ -594,6 +611,26 @@ class PvpView(arcade.View):
 
     def dead(self):
         self.schedule_dead()
+
+    def on_hide_view(self):
+        # Останавливаем музыку (если запущена) и чистим UIManager
+        try:
+            if hasattr(self, "backgound_player") and self.backgound_player:
+                try:
+                    # Стандартный способ — через arcade.stop_sound или через сам плеер
+                    arcade.stop_sound(self.backgound_player)
+                except Exception:
+                    try:
+                        # если объект плеера поддерживает stop()
+                        self.backgound_player.stop()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        try:
+            self.manager.clear()
+        except Exception:
+            pass
 
 
 def make_trail(attached_sprite, maintain=100):
@@ -620,3 +657,14 @@ SPARK_TEX = [
     arcade.make_soft_circle_texture(32, arcade.color.BLUE_GRAY),
     arcade.make_soft_circle_texture(32, arcade.color.DARK_BLUE_GRAY)
 ]
+
+SKIN_MAP = {
+    0: "F-15",
+    1: "F-16",
+    2: "J-35",
+    3: "J-39",
+    4: "MiG-31",
+    5: "Mig-29",
+    6: "Su-27",
+    7: "Su-47",
+}

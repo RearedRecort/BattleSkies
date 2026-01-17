@@ -49,6 +49,11 @@ def add_money(n):
     cur = con.cursor()
     cur.execute(f"UPDATE `users` SET `money` = {money} WHERE `id` = {id}")
 
+def num_sign(n):
+    if n == 0:
+        return 0
+    return round(abs(n) / n)
+
 id = 0
 con = sqlite3.connect("BattleSkies.db")
 money = 0

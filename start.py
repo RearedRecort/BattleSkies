@@ -7,6 +7,7 @@ from arcade.gui.widgets.layout import UIAnchorLayout, UIBoxLayout
 from login import LoginView
 from settings import SettingsView
 from hub import HubView
+from skins import SkinView
 
 
 class StartView(arcade.View):
@@ -64,7 +65,8 @@ class StartView(arcade.View):
         pass
 
     def skins(self, event):
-        pass
+        skins_view = SkinView()
+        self.window.show_view(skins_view)
 
     def multiplay(self, event):
         hub_view = HubView()
@@ -81,3 +83,6 @@ class StartView(arcade.View):
     def ext(self, event):
         vars.clear_sessions()
         arcade.close_window()
+
+    def on_hide_view(self):
+        self.manager.clear()

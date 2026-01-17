@@ -123,12 +123,12 @@ class HubView(arcade.View):
                     else:
                         self.sel = int(lst[1])
                         cur.execute("INSERT INTO `session` (`player`, `game`, `plane`, `team`"
-                                    + f") VALUES ({vars.id}, {game}, 0, {self.sel})")
+                                    + f") VALUES ({vars.id}, {game}, {vars.plane}, {self.sel})")
                         lobby_view = LobbyPvpView(False, game)
                         vars.con.commit()
                         self.window.show_view(lobby_view)
                 else:
-                    cur.execute(f"INSERT INTO `session` (`player`, `game`, `plane`) VALUES ({vars.id}, {game}, 0)")
+                    cur.execute(f"INSERT INTO `session` (`player`, `game`, `plane`) VALUES ({vars.id}, {game}, {vars.plane})")
                     lobby_view = LobbyPveView(False, game)
                     vars.con.commit()
                     self.window.show_view(lobby_view)
@@ -151,7 +151,10 @@ class HubView(arcade.View):
             self.sel = 1
         cur = vars.con.cursor()
         cur.execute("INSERT INTO `session` (`player`, `game`, `plane`, `team`"
-                    + f") VALUES ({vars.id}, {game}, 0, {self.sel})")
+                    + f") VALUES ({vars.id}, {game}, {vars.plane}, {self.sel})")
         lobby_view = LobbyPvpView(False, game)
         vars.con.commit()
         self.window.show_view(lobby_view)
+
+    def on_hide_view(self):
+        self.manager.clear()

@@ -1,6 +1,6 @@
 import arcade
-import os
 import math
+import vars
 
 
 class Plane(arcade.Sprite):
@@ -63,8 +63,8 @@ class Plane(arcade.Sprite):
         missile_speed = 2000.0  # Скорость пули относительно самолёта
 
         # Направление носа самолёта
-        direction_x = math.cos(math.radians(self.angle))
-        direction_y = -math.sin(math.radians(self.angle))
+        direction_x = abs(math.cos(math.radians(self.angle))) * vars.num_sign(self.vx)
+        direction_y = abs(math.sin(math.radians(self.angle))) * vars.num_sign(self.vy)
 
         # Скорость пули = скорость самолёта + скорость выстрела в направлении носа
         missile_vx = self.vx + direction_x * missile_speed
